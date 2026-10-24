@@ -1,0 +1,16 @@
+# Secrets / local config
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Agent outputs
+data/output/
+out/
+*.log
