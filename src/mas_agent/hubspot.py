@@ -103,7 +103,7 @@ class HubSpotClient:
                     "to": {"id": contact_id},
                     "types": [
                         {"associationCategory": "HUBSPOT_DEFINED",
-                         "associationTypeId": 4}  # deal -> contact
+                         "associationTypeId": 3}  # deal -> contact
                     ],
                 }
             ]
@@ -127,20 +127,40 @@ class HubSpotClient:
             return self._dry("log note", payload)
         return self._request("POST", "/crm/v3/objects/notes", payload)
 
+    def update_deal_description(self, deal_id: str, text: str) -> dict:
+        payload = {"properties": {"description": text}}
+        if self.dry_run:
+            return self._dry(f"set description on deal {deal_id}", payload)
+        return self._request("PATCH", f"/crm/v3/objects/deals/{deal_id}", payload)
+
     def push_lead(self, lead, score_result, note_body: str) -> dict:
         """Full push: find-or-create contact, create deal, log a note.
 
         In dry-run mode returns a summary of everything it would have done.
+
+        Notes fallback: HubSpot service keys offer no notes scopes, so if the
+        note call is rejected the score summary is written to the deal's
+        description instead (covered by the deals scopes) and the result
+        records note_mode="deal_description".
         """
         existing = self.search_contact_by_email(lead.email)
         contact = existing or self.create_contact(lead, score_result.score)
         contact_id = contact.get("id") if isinstance(contact, dict) else None
         deal = self.create_deal(lead, score_result, contact_id=contact_id)
-        note = self.log_note(note_body, contact_id=contact_id)
+        note_mode = "note"
+        try:
+            note = self.log_note(note_body, contact_id=contact_id)
+        except RuntimeError as exc:
+            note = {"error": str(exc), "fallback": "deal_description"}
+            note_mode = "deal_description"
+            deal_id = deal.get("id") if isinstance(deal, dict) else None
+            if deal_id:
+                self.update_deal_description(deal_id, note_body)
         return {
             "dry_run": self.dry_run,
             "portal_id": self.portal_id,
             "contact_id": contact_id,
             "deal": deal,
             "note": note,
+            "note_mode": note_mode,
         }
